@@ -5,40 +5,18 @@ import { config } from './config.js';
 let inFlight = 0;
 const waiters = [];
 
-function queueText(pos) {
-  const ahead = pos - 1;
-  if (ahead === 0) return `⏳ Queued — you're next…`;
-  return `⏳ Queued — ${ahead} ${ahead === 1 ? 'job' : 'jobs'} ahead of you…`;
-}
-
-// Sends a "Queued" message via `progress` if the caller has to wait, and edits
-// it as the position changes. Resolves once a slot is free.
-export async function acquireSlot(progress) {
+// Resolves once a slot is free.
+export async function acquireSlot() {
   if (inFlight < config.maxConcurrent && waiters.length === 0) {
     inFlight++;
     return;
   }
-  let initialPos;
-  const slot = new Promise(resolve => {
-    waiters.push({
-      take: () => {
-        inFlight++;
-        resolve();
-      },
-      onUpdate: pos => progress.show(queueText(pos)).catch(() => {}),
-    });
-    initialPos = waiters.length;
-  });
-  // Queue-position messages are cosmetic — if they can't be sent (user blocked
-  // the bot, rate limit), the caller must still get its slot, not a rejection.
-  await progress.show(queueText(initialPos)).catch(() => {});
-  await slot;
+  await new Promise(resolve => waiters.push(resolve));
 }
 
+// Hands the slot straight to the next waiter, so inFlight only drops when nobody waits.
 export function releaseSlot() {
-  inFlight--;
-  if (waiters.length > 0) {
-    waiters.shift().take();
-    waiters.forEach((w, i) => w.onUpdate(i + 1));
-  }
+  const next = waiters.shift();
+  if (next) next();
+  else inFlight--;
 }

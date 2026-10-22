@@ -1,47 +1,17 @@
+# A transcription MCP server for the tars bot. It joins tars's docker network,
+# so tars reaches it at http://stt:8080/mcp; no port is published.
 services:
-  # Fixes bind-mount ownership so UID 101 (bot-api/bot) can write to ./data.
-  init-perms:
-    image: alpine:3.20
-    command: chown -R 101:101 /data
-    volumes:
-      - ./data:/data:z
-
-  telegram-bot-api:
-    image: aiogram/telegram-bot-api:9.6
-    restart: unless-stopped
-    depends_on:
-      init-perms:
-        condition: service_completed_successfully
-    environment:
-      TELEGRAM_API_ID: ${TELEGRAM_API_ID}
-      TELEGRAM_API_HASH: ${TELEGRAM_API_HASH}
-      TELEGRAM_LOCAL: 1
-    ports:
-      - "127.0.0.1:8081:8081"
-    volumes:
-      - ./data/tg-data:/var/lib/telegram-bot-api:z
-    healthcheck:
-      # bot-api has no 200-OK root endpoint, so HTTP probes (wget --spider)
-      # fail even when the server is fully running. TCP port check works.
-      test: ["CMD", "nc", "-z", "127.0.0.1", "8081"]
-      interval: 10s
-      timeout: 3s
-      retries: 5
-      start_period: 10s
-
-  bot:
+  stt:
     build: .
     restart: unless-stopped
     env_file: .env
-    # Match bot-api's UID so we can read its tg-data files (mode 0640).
-    user: "101:101"
-    depends_on:
-      init-perms:
-        condition: service_completed_successfully
-      telegram-bot-api:
-        condition: service_healthy
-    environment:
-      TG_BOT_API_URL: http://telegram-bot-api:8081
     volumes:
-      - ./data/tg-data:/var/lib/telegram-bot-api:ro,z
-      - ./data:/app/data:z
+      # tars's inbound attachments, read-only, at the same path as inside the
+      # tars container (MEDIA_DIR), so marker paths work here verbatim.
+      - ${TARS_ATTACHMENTS_DIR:-../tars/data/attachments}:/app/data/attachments:ro
+    networks: [tars]
+
+networks:
+  tars:
+    name: tars_default
+    external: true

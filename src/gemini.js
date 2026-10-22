@@ -35,7 +35,7 @@ export function createClient(apiKey) {
 }
 
 export async function transcribe(client, audioPath, opts = {}) {
-  const { model = 'gemini-2.5-pro' } = opts;
+  const { model } = opts;
 
   const uploaded = await withRetry(
     () =>

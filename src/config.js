@@ -23,17 +23,16 @@ function int(name, fallback) {
 }
 
 export const config = {
-  // Telegram
-  botToken: str('BOT_TOKEN'),
-  adminUserId: int('ADMIN_USER_ID'),
-  tgBotApiUrl: str('TG_BOT_API_URL', 'https://api.telegram.org'),
+  // Server
+  port: int('PORT', 8080),
+  // Where the bot's attachments are mounted; the same path as inside the tars
+  // container, so the path in an [attachment: …] marker works here verbatim.
+  mediaDir: str('MEDIA_DIR', '/app/data/attachments'),
 
   // Gemini
   geminiApiKey: str('GEMINI_API_KEY'),
-  geminiModel: str('GEMINI_MODEL', 'gemini-2.5-pro'),
+  geminiModel: str('GEMINI_MODEL', 'gemini-3.5-flash'),
 
   // Concurrency
   maxConcurrent: Math.max(1, int('MAX_CONCURRENT', 4)),
 };
-
-export const isLocalApi = (url = config.tgBotApiUrl) => !url.includes('api.telegram.org');

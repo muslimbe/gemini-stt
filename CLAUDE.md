@@ -32,7 +32,8 @@ Fewer lines is the _last_ goal, not the first. If a refactor makes the file shor
 
 ## Operational notes
 
-- Prompt at [src/prompt.md](src/prompt.md) is read once at startup. Restart the bot after editing.
-- Persistent state: `data/access.json` (allowlist) and temp working files. No DB.
-- Two run modes: docker (self-hosted bot-api, 2 GB files) and local (cloud API, 20 MB).
+- An MCP server (streamable HTTP, stateless) with one tool, `transcribe`, used by the tars bot. Entry: [src/server.js](src/server.js).
+- Prompt at [src/prompt.md](src/prompt.md) is read once at startup. Restart the service after editing.
+- No persistent state: only temp working files. Logs go to stdout (`docker compose logs stt`).
+- Reads files only under `MEDIA_DIR` — tars's `data/attachments`, mounted read-only at the same path as in the tars container.
 - Video is supported by extracting the audio track via ffmpeg (`-vn`).

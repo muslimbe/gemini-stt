@@ -1,4 +1,4 @@
-FROM node:20-alpine
+FROM node:24-alpine
 
 RUN apk add --no-cache ffmpeg
 
@@ -12,4 +12,4 @@ COPY src ./src
 
 USER node
 
-CMD ["node", "src/bot.js"]
+CMD ["node", "src/server.js"]
