@@ -32,8 +32,9 @@ Fewer lines is the _last_ goal, not the first. If a refactor makes the file shor
 
 ## Operational notes
 
-- An MCP server (streamable HTTP, stateless) with one tool, `transcribe`, used by the tars bot. Entry: [src/server.js](src/server.js).
+- Two entry points over one pipeline ([src/pipeline.js](src/pipeline.js)): an MCP server (streamable HTTP, stateless) with one tool, `transcribe`, used by the tars bot ([src/server.js](src/server.js)), and a standalone Telegram bot ([src/bot.js](src/bot.js)). Compose runs them as two services, `stt` and `bot`, from one image.
 - Prompt at [src/prompt.md](src/prompt.md) is read once at startup. Restart the service after editing.
-- No persistent state: only temp working files. Logs go to stdout (`docker compose logs stt`).
-- Reads files only under `MEDIA_DIR` — tars's `data/attachments`, mounted read-only at the same path as in the tars container.
+- The only persistent state is the bot's allowlist (`data/access.json`, in the `bot-data` volume); the rest are temp working files. Logs go to stdout (`docker compose logs`).
+- The MCP server reads files only under `MEDIA_DIR` — tars's `data/attachments`, mounted read-only at the same path as in the tars container.
+- The bot uses the cloud Bot API (20 MB download cap). Media handlers are fire-and-forget so a long job doesn't block Telegraf's update loop.
 - Video is supported by extracting the audio track via ffmpeg (`-vn`).

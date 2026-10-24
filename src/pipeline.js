@@ -1,6 +1,6 @@
-import { mkdtemp, realpath, rm } from 'node:fs/promises';
+import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { basename, join, resolve, sep } from 'node:path';
+import { join } from 'node:path';
 import { config } from './config.js';
 import { optimize } from './audio.js';
 import { createClient, transcribe, estimateCost } from './gemini.js';
@@ -8,51 +8,46 @@ import { acquireSlot, releaseSlot } from './queue.js';
 import { logSuccess, logFailure } from './logger.js';
 
 const gemini = createClient(config.geminiApiKey);
+const noop = () => {};
 
-// Transcribes one file and returns the transcript; throws with the reason on failure.
-export async function run(path) {
-  const input = await resolveMedia(path);
-  await acquireSlot();
+// One job, shared by the MCP tool and the bot. `source(tempDir)` resolves to the
+// input file (the bot downloads it into tempDir). `ui` hooks let the bot show
+// progress; the MCP tool passes none. Returns the transcript; throws with the
+// reason on failure, after logging it under `label`.
+export async function run({ label, source, ui = {} }) {
+  const { queued = noop, optimizing = noop, optimized = noop, retry = noop } = ui;
+  await acquireSlot(queued);
 
   const jobStart = Date.now();
-  const file = basename(input);
   let tempDir = null;
   let opt = null;
   let retryCount = 0;
 
   try {
     tempDir = await mkdtemp(join(tmpdir(), 'gemini-stt-'));
+    const input = await source(tempDir);
+
+    await optimizing();
     const optimizedPath = join(tempDir, 'optimized.ogg');
     opt = await optimize(input, optimizedPath);
+    optimized(opt);
 
     const result = await transcribe(gemini, optimizedPath, {
       model: config.geminiModel,
       onRetry: r => {
         if (r) retryCount++;
+        retry(r);
       },
     });
     if (!result.text?.trim()) throw new Error('Got an empty transcript.');
 
-    logSuccess({ file, opt, result, cost: estimateCost(result), retryCount, jobStart });
+    logSuccess({ label, opt, result, cost: estimateCost(result), retryCount, jobStart });
     return result.text.trim();
   } catch (err) {
-    logFailure({ file, opt, retryCount, jobStart, err });
+    logFailure({ label, opt, retryCount, jobStart, err });
     throw err;
   } finally {
     if (tempDir) await rm(tempDir, { recursive: true, force: true }).catch(() => {});
     releaseSlot();
   }
-}
-
-// Only files under MEDIA_DIR (the bot's attachments, mounted read-only) may be read.
-async function resolveMedia(path) {
-  const root = await realpath(config.mediaDir);
-  let full;
-  try {
-    full = await realpath(resolve(root, path));
-  } catch {
-    throw new Error(`File not found: ${path}`);
-  }
-  if (!full.startsWith(root + sep)) throw new Error(`Path is outside ${config.mediaDir}: ${path}`);
-  return full;
 }

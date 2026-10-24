@@ -1,6 +1,7 @@
-# A transcription MCP server for the tars bot. It joins tars's docker network,
-# so tars reaches it at http://stt:8080/mcp; no port is published.
+# Two services from one image, sharing the Gemini key, prompt and pipeline.
 services:
+  # Transcription MCP server for the tars bot. It joins tars's docker network,
+  # so tars reaches it at http://stt:8080/mcp; no port is published.
   stt:
     build: .
     restart: unless-stopped
@@ -10,6 +11,19 @@ services:
       # tars container (MEDIA_DIR), so marker paths work here verbatim.
       - ${TARS_ATTACHMENTS_DIR:-../tars/data/attachments}:/app/data/attachments:ro
     networks: [tars]
+
+  # Standalone Telegram bot: send it a voice note, get a transcript back.
+  bot:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    command: ["node", "src/bot.js"]
+    volumes:
+      - bot-data:/app/data
+
+volumes:
+  # The bot's allowlist (data/access.json).
+  bot-data:
 
 networks:
   tars:

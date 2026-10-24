@@ -1,4 +1,6 @@
+import { realpath } from 'node:fs/promises';
 import { createServer } from 'node:http';
+import { basename, resolve, sep } from 'node:path';
 import { inspect } from 'node:util';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
@@ -14,6 +16,19 @@ const TOOL_DESC =
   'included) and labels speakers when there is more than one. Returns the transcript text. ' +
   'Takes roughly 10–60 s per few minutes of audio.';
 
+// Only files under MEDIA_DIR (the bot's attachments, mounted read-only) may be read.
+async function resolveMedia(path) {
+  const root = await realpath(config.mediaDir);
+  let full;
+  try {
+    full = await realpath(resolve(root, path));
+  } catch {
+    throw new Error(`File not found: ${path}`);
+  }
+  if (!full.startsWith(root + sep)) throw new Error(`Path is outside ${config.mediaDir}: ${path}`);
+  return full;
+}
+
 // Stateless: a fresh server per request, so nothing is shared between calls.
 function createMcp() {
   const mcp = new McpServer({ name: 'gemini-stt', version: '0.2.0' });
@@ -25,7 +40,9 @@ function createMcp() {
     },
     async ({ path }) => {
       try {
-        return { content: [{ type: 'text', text: await run(path) }] };
+        const input = await resolveMedia(path);
+        const text = await run({ label: basename(input), source: () => input });
+        return { content: [{ type: 'text', text }] };
       } catch (err) {
         return { content: [{ type: 'text', text: `Transcription failed: ${extractReason(err)}` }], isError: true };
       }

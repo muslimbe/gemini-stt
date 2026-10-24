@@ -23,7 +23,7 @@ function int(name, fallback) {
 }
 
 export const config = {
-  // Server
+  // MCP server
   port: int('PORT', 8080),
   // Where the bot's attachments are mounted; the same path as inside the tars
   // container, so the path in an [attachment: …] marker works here verbatim.
@@ -36,3 +36,9 @@ export const config = {
   // Concurrency
   maxConcurrent: Math.max(1, int('MAX_CONCURRENT', 4)),
 };
+
+// Read only by the bot, so the MCP server runs without a Telegram token.
+export const botConfig = () => ({
+  botToken: str('BOT_TOKEN'),
+  adminUserId: int('ADMIN_USER_ID'),
+});

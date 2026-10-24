@@ -10,17 +10,17 @@ const stripModel = m => m.replace('gemini-', '');
 // estimateCost() knows only the models in its PRICING table.
 const fmtCost = cost => (cost == null ? '$?' : `$${cost.toFixed(4)}`);
 
-// stdout only: `docker compose logs stt` is the log.
+// stdout only: `docker compose logs` is the log.
 export const log = line => console.log(`[${ts()}] ${line}`);
 
-export function logSuccess({ file, opt, result, cost, retryCount, jobStart }) {
+export function logSuccess({ label, opt, result, cost, retryCount, jobStart }) {
   const elapsed = (Date.now() - jobStart) / 1000;
-  log(`✓ ${file}${optPart(opt)} · ${stripModel(result.model)} · ${fmtCost(cost)} · ${result.text.length} chars · ${fmtDuration(elapsed)} total${fmtRetries(retryCount)}`);
+  log(`✓ ${label}${optPart(opt)} · ${stripModel(result.model)} · ${fmtCost(cost)} · ${result.text.length} chars · ${fmtDuration(elapsed)} total${fmtRetries(retryCount)}`);
 }
 
-export function logFailure({ file, opt, retryCount, jobStart, err }) {
+export function logFailure({ label, opt, retryCount, jobStart, err }) {
   const elapsed = (Date.now() - jobStart) / 1000;
-  log(`✗ ${file}${optPart(opt)} · ${stripModel(config.geminiModel)} · ${fmtDuration(elapsed)} total${fmtRetries(retryCount)} · failed: ${extractReason(err)}`);
+  log(`✗ ${label}${optPart(opt)} · ${stripModel(config.geminiModel)} · ${fmtDuration(elapsed)} total${fmtRetries(retryCount)} · failed: ${extractReason(err)}`);
   // Full error with stack and cause chain — for diagnosing "fetch failed" and similar opaque errors.
   log(inspect(err, { depth: 5 }));
 }
