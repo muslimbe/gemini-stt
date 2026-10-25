@@ -20,12 +20,17 @@ async function probe(path) {
   return { duration, size };
 }
 
+// Short clips skip FILTERS: on a few-second voice note the speedup and silence
+// trim cost Gemini words ("34 ming" heard as "30-o'rin") and save next to nothing.
+const MIN_FILTER_SECONDS = 120;
+
 // Trim silences (>0.5s, <-50dB, with 0.5s padding) and speed up 1.25×.
 const FILTERS =
   'silenceremove=start_periods=1:start_duration=0.5:start_silence=0.5:start_threshold=-50dB:stop_periods=-1:stop_duration=0.5:stop_silence=0.5:stop_threshold=-50dB,atempo=1.25';
 
 export async function optimize(input, output) {
   const before = await probe(input);
+  const filtered = before.duration >= MIN_FILTER_SECONDS;
 
   let ffmpegStderr = '';
   await new Promise((resolve, reject) => {
@@ -36,7 +41,7 @@ export async function optimize(input, output) {
       .audioFrequency(16000)
       .audioChannels(1)
       .format('ogg')
-      .audioFilters(FILTERS)
+      .audioFilters(filtered ? FILTERS : [])
       .on('stderr', line => {
         ffmpegStderr += line + '\n';
       })
@@ -46,7 +51,7 @@ export async function optimize(input, output) {
   });
 
   const outStat = await stat(output).catch(() => null);
-  if (!outStat || outStat.size < 1000) {
+  if (!outStat || (filtered && outStat.size < 1000)) {
     throw new Error(`Optimization produced empty/tiny output (${outStat?.size ?? 'no file'} bytes); silenceremove consumed (almost) the entire input.`);
   }
 

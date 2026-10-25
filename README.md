@@ -7,7 +7,7 @@ Voice, audio and video transcription with Gemini, in two forms from one codebase
 
 Both share the same pipeline:
 
-- **Audio optimization** — silence trim + speedup + Opus re-encode. ~30–40% cheaper Gemini calls.
+- **Audio optimization** — silence trim + speedup + Opus re-encode. ~30–40% cheaper Gemini calls on recordings of 2 minutes and longer; shorter clips are only re-encoded, since trimming them costs accuracy.
 - **Speaker diarization**, Uzbek/Russian/English code-switching (configured in [`src/prompt.md`](src/prompt.md)).
 
 ## Setup
@@ -38,7 +38,7 @@ The bot needs its own token from [@BotFather](https://t.me/BotFather), not tars'
 
 1. tars saves an inbound voice note, audio or video under `data/attachments/` and shows the model an `[attachment: <path> type=audio/…]` marker.
 2. The model calls `transcribe` with that path. This service sees the same directory, mounted read-only at the same path.
-3. ffmpeg extracts audio (video stream dropped) and optimizes: trim silences, speed up, encode to 16 kHz mono Opus.
+3. ffmpeg extracts audio (video stream dropped) and encodes it to 16 kHz mono Opus; from 2 minutes on it also trims silences and speeds up.
 4. The file is uploaded to the Gemini File API; `generateContent` runs with the system instruction from [`src/prompt.md`](src/prompt.md).
 5. The transcript is the tool's result.
 
@@ -62,7 +62,7 @@ Defaults work; tune in `.env` only if needed.
 - `MAX_CONCURRENT` — simultaneous jobs per service, the rest queue (default 4).
 - `TARS_ATTACHMENTS_DIR` — host path of tars's `data/attachments` (default `../tars/data/attachments`).
 
-Audio optimization parameters (silence trim, 1.25× speedup) are hardcoded in [`src/audio.js`](src/audio.js).
+Audio optimization parameters (silence trim, 1.25× speedup, the 2-minute threshold) are hardcoded in [`src/audio.js`](src/audio.js).
 
 ## Limits
 
