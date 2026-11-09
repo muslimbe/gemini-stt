@@ -48,7 +48,7 @@ The bot needs its own token from [@BotFather](https://t.me/BotFather), not tars'
 2. The bot downloads it and shows one status message that it edits as the job moves: queued, downloading, optimizing, transcribing.
 3. The transcript comes as a reply to your file: a message, or `transcript-<id>.txt` when it's too long for one.
 
-Only the admin and allowlisted users get answers; others are ignored. `/whoami` shows anyone their ID. The admin manages the list with `/allow <id>`, `/deny <id>` and `/list`; it is kept in the `bot-data` docker volume.
+Only the admin and allowlisted users get answers; anyone else is told once that they aren't authorized, with their ID to pass to the admin. `/whoami` shows anyone their ID. The admin manages the list with `/allow <id>`, `/deny <id>` and `/list`; it is kept in the `bot-data` docker volume.
 
 Edit [`src/prompt.md`](src/prompt.md) to change transcription behavior (speaker labels, language, formatting), then `docker compose restart`.
 
@@ -67,4 +67,5 @@ Audio optimization parameters (silence trim, 1.25× speedup, the 2-minute thresh
 ## Limits
 
 - Both tars and the bot download through Telegram's cloud Bot API, so inputs cap at 20 MB.
+- The bot retries Telegram calls and file downloads that fail on the network (up to 4 tries, 1–4 s apart); an error from Telegram itself is shown, not retried.
 - tars ends a turn that shows no activity for 10 minutes (`TARS_LIVENESS_TIMEOUT_SECONDS`), which bounds how long one transcription may take.

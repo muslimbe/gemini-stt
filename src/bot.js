@@ -8,6 +8,7 @@ import { downloadFile } from './download.js';
 import { run } from './pipeline.js';
 import { fmtOutput, fmtBytes } from './format.js';
 import { log } from './logger.js';
+import { withRetry } from './network.js';
 import * as status from './status.js';
 
 const cfg = botConfig();
@@ -22,6 +23,14 @@ const userTag = u => `${u.username ? `@${u.username}` : [u.first_name, u.last_na
 const bot = new Telegraf(cfg.botToken, {
   handlerTimeout: 60 * 60 * 1000, // media handlers are fire-and-forget, so this only guards command replies; keep it above the undici timeouts (config.js) so a stalled Telegram call times out there first
 });
+
+// Every Bot API call (replies, status edits, getFile) retries network failures.
+const callApi = bot.telegram.callApi.bind(bot.telegram);
+bot.telegram.callApi = (method, ...args) =>
+  withRetry(
+    () => callApi(method, ...args),
+    (err, attempt) => log(`telegram ${method} failed (${err.code ?? err.message}), retry ${attempt}`),
+  );
 
 // DM-only: silently drop anything from groups/channels.
 bot.use((ctx, next) => (ctx.chat?.type === 'private' ? next() : undefined));
@@ -71,8 +80,16 @@ bot.command('list', ctx => {
   return ctx.reply(ids.length ? `Allowed users (${ids.length}):\n${ids.join('\n')}` : 'Allowlist is empty.');
 });
 
-// Allowlist: silently ignore non-allowlisted users.
-bot.use((ctx, next) => (isAllowed(ctx.from?.id) ? next() : undefined));
+// Allowlist: everyone else gets told once per run (not once per message) and is otherwise ignored.
+const refused = new Set();
+bot.use((ctx, next) => {
+  const u = ctx.from;
+  if (isAllowed(u?.id)) return next();
+  if (!u || refused.has(u.id)) return;
+  refused.add(u.id);
+  log(`unauthorized message — id=${u.id}, username=@${u.username ?? 'none'}`);
+  return ctx.reply(fmtWhoami(u, false));
+});
 
 // Media handlers — audio + video; video runs through the same pipeline since ffmpeg extracts the audio track.
 // Fire-and-forget (`void`): Telegraf won't fetch the next getUpdates batch until
