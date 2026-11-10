@@ -1,113 +1,73 @@
 # gemini-stt
 
-Personal Telegram bot. Send a voice note, audio file, or video → get back a transcript via Gemini.
+Voice, audio and video transcription with Gemini, in two forms from one codebase:
 
-- **Audio optimization** — silence trim + speedup + Opus re-encode. ~30–40% cheaper Gemini calls.
-- **Returns the optimized audio** before transcribing, so you can hear what Gemini hears.
-- **Smart output** — short transcripts as a Telegram message, long ones as a `.txt` document.
-- **Speaker diarization** with timestamps (configured in [`src/prompt.md`](src/prompt.md)).
-- **Two run modes**: docker (self-hosted Bot API, 2 GB files) or local (cloud Bot API, 20 MB files).
+- **`stt`** — an MCP server for the [tars](https://github.com/muslimbe/tars) bot, with one tool, `transcribe`: give it the path of a file tars received, get back the transcript.
+- **`bot`** — a standalone Telegram bot: send it a voice note, audio or video, get the transcript as a reply.
+
+Both share the same pipeline:
+
+- **Audio optimization** — silence trim + speedup + Opus re-encode. ~30–40% cheaper Gemini calls on recordings of 2 minutes and longer; shorter clips are only re-encoded, since trimming them costs accuracy.
+- **Speaker diarization**, Uzbek/Russian/English code-switching (configured in [`src/prompt.md`](src/prompt.md)).
 
 ## Setup
 
-### 1. Configure
-
 ```bash
-cp .env.example .env
-# fill in BOT_TOKEN, ADMIN_USER_ID, GEMINI_API_KEY
-```
-
-For docker mode, also fill `TELEGRAM_API_ID` and `TELEGRAM_API_HASH` from <https://my.telegram.org/apps>.
-
-### 2. Run
-
-**Docker** (production / self-hosted):
-
-First time only — release the bot from Telegram's cloud:
-
-```bash
-curl -X POST "https://api.telegram.org/bot$BOT_TOKEN/logOut"
-```
-
-Then:
-
-```bash
+cp .env.example .env      # fill in GEMINI_API_KEY, BOT_TOKEN, ADMIN_USER_ID
 docker compose up -d --build
-docker compose logs -f bot
+docker compose logs -f
 ```
 
-**Local** (dev / cloud API) — requires Node 20+ and `ffmpeg` on `PATH` ([install](#installing-ffmpeg)):
+The bot needs its own token from [@BotFather](https://t.me/BotFather), not tars's: Telegram lets only one process poll a token. To run just one of the two, name it: `docker compose up -d stt`.
 
-```bash
-npm install
-npm run dev:start
+`stt` joins tars's docker network (`tars_default`), so tars must be up first. Enable it in tars's `plugins.json` and restart tars:
+
+```json
+{
+  "name": "stt",
+  "type": "http",
+  "url": "http://stt:8080/mcp",
+  "allowed_tools": ["mcp__stt"],
+  "enabled": true
+}
 ```
-
-Don't run both modes at once — Telegram allows only one polling client per token.
 
 ## How it works
 
-1. Voice/audio/video arrives → bot downloads it (HTTPS in cloud mode; direct disk read from shared `tg-data` volume in self-hosted mode).
-2. ffmpeg extracts audio (video stream dropped) and optimizes: trim silences, speed up, encode to 16 kHz mono Opus.
-3. Bot sends the optimized file back so you can hear what's going to Gemini.
-4. File uploaded to Gemini File API; `generateContent` called with the system instruction from [`src/prompt.md`](src/prompt.md).
-5. Transcript replied as inline message (< 3800 chars) or `transcript.txt` document.
+**MCP (`stt`)**
 
-Edit [`src/prompt.md`](src/prompt.md) to change transcription behavior (speaker labels, language, formatting). Restart the bot.
+1. tars saves an inbound voice note, audio or video under `data/attachments/` and shows the model an `[attachment: <path> type=audio/…]` marker.
+2. The model calls `transcribe` with that path. This service sees the same directory, mounted read-only at the same path.
+3. ffmpeg extracts audio (video stream dropped) and encodes it to 16 kHz mono Opus; from 2 minutes on it also trims silences and speeds up.
+4. The file is uploaded to the Gemini File API; `generateContent` runs with the system instruction from [`src/prompt.md`](src/prompt.md).
+5. The transcript is the tool's result.
+
+**Telegram (`bot`)**
+
+1. You send a voice note, audio, video, video note, or an audio/video document.
+2. The bot asks what to do, with two buttons: **📝 Matnga o'girish** (transcribe) and **✂️ Kesish** (cut). Nothing starts on its own.
+3. Transcribe: one status message edited as the job moves (queued, downloading, optimizing, transcribing), then the transcript as a reply to your file — a message, or `transcript-<id>.txt` when it's too long for one.
+4. Cut: opens the [Cho'rtkesar](https://github.com/muslimbe/chortkesar) Mini App with that file (set `TRIM_APP_URL`; it runs on this bot's token). Over 20 MB, Telegram won't hand the file to bots, so the Mini App opens its own file picker.
+
+Only the admin and allowlisted users get answers; anyone else is told once that they aren't authorized, with their ID to pass to the admin. `/whoami` shows anyone their ID. The admin manages the list with `/allow <id>`, `/deny <id>` and `/list`; it is kept in the `bot-data` docker volume.
+
+Edit [`src/prompt.md`](src/prompt.md) to change transcription behavior (speaker labels, language, formatting), then `docker compose restart`.
 
 ## Configuration
 
 Defaults work; tune in `.env` only if needed.
 
-**Required**
+- `GEMINI_API_KEY` (required) — from <https://aistudio.google.com/apikey>.
+- `BOT_TOKEN`, `ADMIN_USER_ID` (required by `bot`) — the bot's token and your Telegram user ID.
+- `TRIM_APP_URL` (optional, `bot`) — the Cho'rtkesar Mini App's HTTPS URL; adds the **✂️ Kesish** button.
+- `GEMINI_MODEL` — `gemini-3.5-flash` (default). Pro models (`gemini-3.1-pro-preview`) need billing on the API key. `gemini-2.5-pro` is closed to new users.
+- `MAX_CONCURRENT` — simultaneous jobs per service, the rest queue (default 4).
+- `TARS_ATTACHMENTS_DIR` — host path of tars's `data/attachments` (default `../tars/data/attachments`).
 
-- `BOT_TOKEN` — from [@BotFather](https://t.me/BotFather).
-- `ADMIN_USER_ID` — your Telegram user ID. DM `/whoami` to find it. Admin is always allowed and can manage the allowlist via `/allow <id>`, `/deny <id>`, `/list`. Other users are persisted in `data/access.json`.
-- `GEMINI_API_KEY` — from <https://aistudio.google.com/apikey>.
+Audio optimization parameters (silence trim, 1.25× speedup, the 2-minute threshold) are hardcoded in [`src/audio.js`](src/audio.js).
 
-**Required for docker (self-hosted bot-api)**
+## Limits
 
-- `TELEGRAM_API_ID`, `TELEGRAM_API_HASH` — from <https://my.telegram.org/apps>. Read by the bot-api container only.
-
-**Gemini**
-
-- `GEMINI_MODEL` — `gemini-2.5-pro` (default) or `gemini-2.5-flash` (~3× cheaper).
-
-Audio optimization parameters (silence trim, 1.25× speedup) are hardcoded in [`src/audio.js`](src/audio.js).
-
-## Reverting docker → local
-
-```bash
-curl -X POST "http://localhost:8081/bot$BOT_TOKEN/close"
-docker compose down
-```
-
-`close` returns 429 in the first 10 minutes after the local server starts — Telegram-side limit, wait and retry.
-
-## Installing ffmpeg
-
-Only needed for local mode. Docker bundles its own.
-
-**macOS**:
-
-```bash
-brew install ffmpeg
-```
-
-**Linux** (Debian / Ubuntu):
-
-```bash
-sudo apt update && sudo apt install -y ffmpeg
-```
-
-Arch: `sudo pacman -S ffmpeg`. Fedora/RHEL: `sudo dnf install ffmpeg`.
-
-**Windows** (winget, built into Windows 10/11):
-
-```powershell
-winget install Gyan.FFmpeg
-```
-
-Alternatives: `choco install ffmpeg` or `scoop install ffmpeg`.
-
-Verify with `ffmpeg -version`.
+- Both tars and the bot download through Telegram's cloud Bot API, so inputs cap at 20 MB.
+- The bot retries Telegram calls and file downloads that fail on the network (up to 4 tries, 1–4 s apart); an error from Telegram itself is shown, not retried.
+- tars ends a turn that shows no activity for 10 minutes (`TARS_LIVENESS_TIMEOUT_SECONDS`), which bounds how long one transcription may take.
