@@ -45,8 +45,9 @@ The bot needs its own token from [@BotFather](https://t.me/BotFather), not tars'
 **Telegram (`bot`)**
 
 1. You send a voice note, audio, video, video note, or an audio/video document.
-2. The bot downloads it and shows one status message that it edits as the job moves: queued, downloading, optimizing, transcribing.
-3. The transcript comes as a reply to your file: a message, or `transcript-<id>.txt` when it's too long for one.
+2. The bot asks what to do, with two buttons: **📝 Matnga o'girish** (transcribe) and **✂️ Kesish** (cut). Nothing starts on its own.
+3. Transcribe: one status message edited as the job moves (queued, downloading, optimizing, transcribing), then the transcript as a reply to your file — a message, or `transcript-<id>.txt` when it's too long for one.
+4. Cut: opens the [Cho'rtkesar](https://github.com/muslimbe/chortkesar) Mini App with that file (set `TRIM_APP_URL`; it runs on this bot's token). Over 20 MB, Telegram won't hand the file to bots, so the Mini App opens its own file picker.
 
 Only the admin and allowlisted users get answers; anyone else is told once that they aren't authorized, with their ID to pass to the admin. `/whoami` shows anyone their ID. The admin manages the list with `/allow <id>`, `/deny <id>` and `/list`; it is kept in the `bot-data` docker volume.
 
@@ -58,6 +59,7 @@ Defaults work; tune in `.env` only if needed.
 
 - `GEMINI_API_KEY` (required) — from <https://aistudio.google.com/apikey>.
 - `BOT_TOKEN`, `ADMIN_USER_ID` (required by `bot`) — the bot's token and your Telegram user ID.
+- `TRIM_APP_URL` (optional, `bot`) — the Cho'rtkesar Mini App's HTTPS URL; adds the **✂️ Kesish** button.
 - `GEMINI_MODEL` — `gemini-3.5-flash` (default). Pro models (`gemini-3.1-pro-preview`) need billing on the API key. `gemini-2.5-pro` is closed to new users.
 - `MAX_CONCURRENT` — simultaneous jobs per service, the rest queue (default 4).
 - `TARS_ATTACHMENTS_DIR` — host path of tars's `data/attachments` (default `../tars/data/attachments`).

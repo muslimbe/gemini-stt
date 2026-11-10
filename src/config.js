@@ -41,4 +41,6 @@ export const config = {
 export const botConfig = () => ({
   botToken: str('BOT_TOKEN'),
   adminUserId: int('ADMIN_USER_ID'),
+  // The Cho'rtkesar Mini App's HTTPS URL; empty means no "Cut" button.
+  trimAppUrl: str('TRIM_APP_URL', ''),
 });

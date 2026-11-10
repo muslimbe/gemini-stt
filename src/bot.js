@@ -10,6 +10,7 @@ import { fmtOutput, fmtBytes } from './format.js';
 import { log } from './logger.js';
 import { withRetry } from './network.js';
 import * as status from './status.js';
+import { trimUrl } from './trim.js';
 
 const cfg = botConfig();
 
@@ -91,32 +92,70 @@ bot.use((ctx, next) => {
   return ctx.reply(fmtWhoami(u, false));
 });
 
-// Media handlers — audio + video; video runs through the same pipeline since ffmpeg extracts the audio track.
-// Fire-and-forget (`void`): Telegraf won't fetch the next getUpdates batch until
-// every handler resolves, so awaiting a multi-minute transcription here would
-// freeze /start and all other updates for its whole duration. handle() never
-// rejects, so dropping the promise is safe.
-bot.on(message('voice'), ctx => void handle(ctx, ctx.message.voice));
-bot.on(message('audio'), ctx => void handle(ctx, ctx.message.audio));
-bot.on(message('video'), ctx => void handle(ctx, ctx.message.video));
-bot.on(message('video_note'), ctx => void handle(ctx, ctx.message.video_note));
+// Media handlers — audio + video (ffmpeg extracts a video's audio track). Nothing
+// starts on its own: the user picks transcribing or cutting, since waiting for a
+// transcript is wasted time when they came to cut.
+bot.on(message('voice'), ctx => offer(ctx, ctx.message.voice, 'voice.ogg'));
+bot.on(message('audio'), ctx => offer(ctx, ctx.message.audio, 'audio'));
+bot.on(message('video'), ctx => offer(ctx, ctx.message.video, 'video.mp4'));
+bot.on(message('video_note'), ctx => offer(ctx, ctx.message.video_note, 'video_note.mp4'));
 bot.on(message('document'), ctx => {
   const d = ctx.message.document;
   const mime = d.mime_type ?? '';
   if (!mime.startsWith('audio/') && !mime.startsWith('video/')) {
     return ctx.reply(`Document is not audio or video (mime: ${mime || '?'}). Ignored.`);
   }
-  void handle(ctx, d);
+  return offer(ctx, d, 'file');
+});
+
+const CHOOSE = 'Nima qilamiz?';
+const TRANSCRIBE = 'transcribe';
+const transcribeRow = [{ text: "📝 Matnga o'girish", callback_data: TRANSCRIBE }];
+
+// The "Cut" button opens the Mini App with this file; over Telegram's 20 MB
+// download cap it opens the Mini App's own file picker instead.
+function cutRow(ctx, file, fallbackName) {
+  if (!cfg.trimAppUrl) return [];
+  const url =
+    file.file_size > MAX_DOWNLOAD
+      ? cfg.trimAppUrl
+      : trimUrl(cfg.trimAppUrl, { fileId: file.file_id, userId: ctx.from.id, name: file.file_name ?? fallbackName, botToken: cfg.botToken });
+  return [[{ text: '✂️ Kesish', web_app: { url } }]];
+}
+
+function offer(ctx, file, fallbackName) {
+  const tooBig = file.file_size > MAX_DOWNLOAD;
+  const text = tooBig ? `${CHOOSE}\n\nFayl ${fmtBytes(file.file_size)}: Telegram botga 20 MB gacha beradi, shuning uchun matnga o'girib bo'lmaydi. Kesish uchun faylni ilovada qayta tanlang.` : CHOOSE;
+  const rows = [...(tooBig ? [] : [transcribeRow]), ...cutRow(ctx, file, fallbackName)];
+  if (!rows.length) return ctx.reply(text, { reply_parameters: { message_id: ctx.message.message_id } });
+  return ctx.reply(text, { reply_parameters: { message_id: ctx.message.message_id }, reply_markup: { inline_keyboard: rows } });
+}
+
+// The file a choice message is about: the media message it replies to.
+function chosenFile(msg) {
+  const m = msg?.reply_to_message;
+  return m && (m.voice ?? m.audio ?? m.video ?? m.video_note ?? m.document);
+}
+
+// "Transcribe" pressed: drop that button (it can't run twice), keep "Cut", run the job.
+// Fire-and-forget (`void`): Telegraf won't fetch the next getUpdates batch until
+// every handler resolves, so awaiting a multi-minute transcription here would
+// freeze /start and all other updates for its whole duration. handle() never
+// rejects, so dropping the promise is safe.
+bot.action(TRANSCRIBE, async ctx => {
+  const msg = ctx.callbackQuery.message;
+  const file = chosenFile(msg);
+  if (!file) return ctx.answerCbQuery('Fayl topilmadi, qaytadan yuboring.');
+  await ctx.answerCbQuery();
+  const rows = (msg.reply_markup?.inline_keyboard ?? []).filter(row => row[0]?.callback_data !== TRANSCRIBE);
+  await ctx.editMessageReplyMarkup({ inline_keyboard: rows }).catch(() => {});
+  void handle(ctx, file, msg.reply_to_message.message_id);
 });
 
 // One status message per job, edited as it moves along; the transcript is a
 // reply to the user's file. Never rejects: every failure ends up in the status
 // message or the log.
-async function handle(ctx, file) {
-  if (file.file_size > MAX_DOWNLOAD) {
-    await ctx.reply(`Too big: ${fmtBytes(file.file_size)}. Telegram lets bots download files up to 20 MB.`).catch(() => {});
-    return;
-  }
+async function handle(ctx, file, replyTo) {
   const ui = status.createStatus(ctx);
   const progress = { block: '', retry: null };
   let text;
@@ -129,7 +168,7 @@ async function handle(ctx, file) {
   }
   ui.stopTicker();
   try {
-    await sendTranscript(ctx, text);
+    await sendTranscript(ctx, text, replyTo);
     await ui.finish(progress.block);
   } catch (err) {
     log(`✗ ${userTag(ctx.from)} · transcript not delivered: ${err?.message ?? err}`);
@@ -157,8 +196,8 @@ const hooks = (ui, progress) => ({
   },
 });
 
-function sendTranscript(ctx, text) {
-  const extra = { reply_parameters: { message_id: ctx.message.message_id } };
+function sendTranscript(ctx, text, replyTo) {
+  const extra = { reply_parameters: { message_id: replyTo } };
   const output = fmtOutput(text, randomBytes(3).toString('hex'));
   if (output.kind === 'message') return ctx.reply(output.text, extra);
   return ctx.replyWithDocument(Input.fromBuffer(Buffer.from(output.content), output.filename), extra);
